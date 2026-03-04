@@ -8,6 +8,7 @@ public class ShapeDrawer : MonoBehaviour
     [Header("Drawing Settings")]
     public float minDistanceBetweenPoints = 5f; // Pixels
     public float rdpTolerance = 25f; // Tolerance for shape simplification (higher = fewer corners)
+    public float minShapeSize = 100f; // Pixels - How wide/tall the drawing must be minimum
     
     [Header("References")]
     public CombatManager combatManager;
@@ -110,6 +111,31 @@ public class ShapeDrawer : MonoBehaviour
             return;
         }
 
+        // 0. Verify the shape isn't too small
+        float minX = float.MaxValue, maxX = float.MinValue;
+        float minY = float.MaxValue, maxY = float.MinValue;
+        foreach (var p in _drawnPoints)
+        {
+            if (p.x < minX) minX = p.x;
+            if (p.x > maxX) maxX = p.x;
+            if (p.y < minY) minY = p.y;
+            if (p.y > maxY) maxY = p.y;
+        }
+
+        float boundsWidth = maxX - minX;
+        float boundsHeight = maxY - minY;
+
+        if (boundsWidth < minShapeSize && boundsHeight < minShapeSize)
+        {
+            Debug.Log($"<color=yellow>Shape rejected! Too small. Width: {boundsWidth}, Height: {boundsHeight}</color>");
+            if (combatManager != null && combatManager.gameUI != null)
+            {
+                combatManager.gameUI.ShowCustomMessage("Shape drawn too small!");
+            }
+            StopDrawing();
+            return; // Don't even resolve combat
+        }
+
         // 1. First, find the "Convex Hull" of the drawn points.
         // This acts like a rubber band stretched around the drawing.
         // It completely ignores any messy scribbling, overlapping lines, 
@@ -135,7 +161,7 @@ public class ShapeDrawer : MonoBehaviour
 
         Debug.Log($"<color=cyan>Shape Recognized! Raw Points: {_drawnPoints.Count} | Simplified Points: {simplifiedPoints.Count} | Estimated Corners: {cornerCount}</color>");
 
-        // 2. Send the corner count to Combat Manager
+        // 3. Send the corner count to Combat Manager
         if (combatManager != null)
         {
             combatManager.ResolveCombat(cornerCount);

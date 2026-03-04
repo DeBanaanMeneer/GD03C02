@@ -23,6 +23,16 @@ public class CombatManager : MonoBehaviour
 
     private void Start()
     {
+        // Automatically find GameUI if not assigned
+        if (gameUI == null)
+        {
+            gameUI = FindObjectOfType<GameUI>();
+            if (gameUI == null)
+            {
+                Debug.LogWarning("[CombatManager] No GameUI found in the scene! Combat logs will not be displayed.");
+            }
+        }
+
         if (groupingIndicatorPrefab != null)
         {
             _currentIndicator = Instantiate(groupingIndicatorPrefab, transform.position, Quaternion.identity);
@@ -125,7 +135,33 @@ public class CombatManager : MonoBehaviour
 
         if (enemyCount == 0)
         {
-            Debug.Log($"Drawn {drawnCorners} corners, but no enemies grouped! Wasted shape.");
+            Debug.Log($"Drawn {drawnCorners} corners, but no enemies grouped! Wasted shape punished: took {drawnCorners} damage.");
+            playerHealth -= drawnCorners;
+            if (playerHealth <= 0)
+            {
+                Debug.Log("<color=red>PLAYER DIED!</color>");
+                DeactivateSlomo();
+                
+                Cursor.lockState = CursorLockMode.None;
+                Cursor.visible = true;
+
+                // Stop the game natively
+#if UNITY_EDITOR
+                UnityEditor.EditorApplication.isPlaying = false;
+#else
+                Application.Quit();
+#endif
+
+                Destroy(gameObject);
+                return;
+            }
+            
+            // Update UI
+            if (gameUI != null)
+            {
+                gameUI.ShowCombatResult(0, drawnCorners, drawnCorners);
+            }
+
             DeactivateSlomo();
             return;
         }
@@ -155,6 +191,20 @@ public class CombatManager : MonoBehaviour
             if (playerHealth <= 0)
             {
                 Debug.Log("<color=red>PLAYER DIED!</color>");
+                DeactivateSlomo();
+
+                Cursor.lockState = CursorLockMode.None;
+                Cursor.visible = true;
+
+                // Stop the game natively
+#if UNITY_EDITOR
+                UnityEditor.EditorApplication.isPlaying = false;
+#else
+                Application.Quit();
+#endif
+                
+                Destroy(gameObject);
+                return;
             }
         }
 
