@@ -14,11 +14,18 @@ public class EnemyAI : MonoBehaviour
     public float wanderDuration = 5f;
     public float wanderSpeedMultiplier = 1.5f;
 
+    [Header("Combat Settings")]
+    public float enemyHealth = 3f;
+    public float damagePerAttack = 0.5f;
+    public float attackCooldown = 1f;
+
     private Transform _playerTransform;
     private Rigidbody _rigidbody;
     private bool _isWandering = true;
     private Vector3 _wanderDirection;
     private float _spawnTime;
+    private float _lastAttackTime;
+    private CombatManager _combatManager;
 
     private void Start()
     {
@@ -36,6 +43,7 @@ public class EnemyAI : MonoBehaviour
         {
             _playerTransform = player.transform;
         }
+        _combatManager = FindAnyObjectByType<CombatManager>();
 
         // Initialize Wander State
         _isWandering = true;
@@ -76,19 +84,34 @@ public class EnemyAI : MonoBehaviour
 
         // --- Chasing Logic ---
 
-        if (distanceToPlayer <= detectionRange && distanceToPlayer > stoppingDistance)
+        if (distanceToPlayer <= detectionRange)
         {
-            // Rotate towards player
-            Vector3 direction = (_playerTransform.position - transform.position).normalized;
-            direction.y = 0; // Keep horizontal
-            
-            if (direction != Vector3.zero)
+            if (distanceToPlayer > stoppingDistance)
             {
-                Quaternion targetRotation = Quaternion.LookRotation(direction);
-                transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, Time.deltaTime * 5f);
+                // Rotate towards player
+                Vector3 direction = (_playerTransform.position - transform.position).normalized;
+                direction.y = 0; // Keep horizontal
                 
-                // Move towards player
-                transform.position += transform.forward * movementSpeed * Time.deltaTime;
+                if (direction != Vector3.zero)
+                {
+                    Quaternion targetRotation = Quaternion.LookRotation(direction);
+                    transform.rotation = Quaternion.Slerp(transform.rotation, targetRotation, Time.deltaTime * 5f);
+                    
+                    // Move towards player
+                    transform.position += transform.forward * movementSpeed * Time.deltaTime;
+                }
+            }
+            else
+            {
+                // Attack Player
+                if (Time.time - _lastAttackTime >= attackCooldown)
+                {
+                    _lastAttackTime = Time.time;
+                    if (_combatManager != null)
+                    {
+                        _combatManager.TakeDamage(damagePerAttack);
+                    }
+                }
             }
         }
     }
@@ -98,5 +121,21 @@ public class EnemyAI : MonoBehaviour
     {
         Gizmos.color = Color.yellow;
         Gizmos.DrawWireSphere(transform.position, detectionRange);
+    }
+
+    public void TakeDamage(float amount)
+    {
+        enemyHealth -= amount;
+        if (enemyHealth <= 0)
+        {
+            if (_combatManager != null && _combatManager.useEnergySystem)
+            {
+                // Grant energy for a manual kill
+                _combatManager.currentSlomoEnergy += _combatManager.slomoEnergyGainPerKill;
+                if (_combatManager.currentSlomoEnergy > _combatManager.maxSlomoEnergy)
+                    _combatManager.currentSlomoEnergy = _combatManager.maxSlomoEnergy;
+            }
+            Destroy(gameObject);
+        }
     }
 }

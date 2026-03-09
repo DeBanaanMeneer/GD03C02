@@ -7,13 +7,23 @@ public class PlayerController : MonoBehaviour
     public float moveSpeed = 5f;
     public float gravity = -9.81f;
 
+    [Header("Combat")]
+    public float attackRange = 3f;
+    public float attackRadius = 1f;
+    public float attackDamage = 1f;
+    public float attackCooldown = 0.5f;
+    public float attackHeightOffset = 0f;
+
     private CharacterController _controller;
     private Vector3 _velocity;
     private bool _isGrounded;
+    private float _lastAttackTime;
+    private CombatManager _combatManager;
 
     private void Start()
     {
         _controller = GetComponent<CharacterController>();
+        _combatManager = FindAnyObjectByType<CombatManager>();
     }
 
     private void Update()
@@ -23,6 +33,19 @@ public class PlayerController : MonoBehaviour
         if (_isGrounded && _velocity.y < 0)
         {
             _velocity.y = -2f; // Small downward force to keep grounded
+        }
+
+        // Handle Manual Attack
+        var mouse = UnityEngine.InputSystem.Mouse.current;
+        if (mouse != null && mouse.leftButton.wasPressedThisFrame)
+        {
+            if (_combatManager == null || !_combatManager.IsSlomoActive)
+            {
+                if (Time.time - _lastAttackTime >= attackCooldown)
+                {
+                    PerformManualAttack();
+                }
+            }
         }
 
         var kb = UnityEngine.InputSystem.Keyboard.current;
@@ -49,5 +72,33 @@ public class PlayerController : MonoBehaviour
         // Apply gravity
         _velocity.y += gravity * Time.deltaTime;
         _controller.Move(_velocity * Time.deltaTime);
+    }
+
+    private void PerformManualAttack()
+    {
+        _lastAttackTime = Time.time;
+        
+        // Attack enemies in front of the player
+        Vector3 sphereCastStart = transform.position + Vector3.up * attackHeightOffset; // Adjust height locally
+        
+        RaycastHit[] hits = Physics.SphereCastAll(sphereCastStart, attackRadius, transform.forward, attackRange);
+        
+        foreach (var hit in hits)
+        {
+            EnemyAI enemy = hit.collider.GetComponent<EnemyAI>();
+            if (enemy != null)
+            {
+                enemy.TakeDamage(attackDamage);
+            }
+        }
+    }
+
+    private void OnDrawGizmosSelected()
+    {
+        Gizmos.color = Color.red;
+        Vector3 start = transform.position + Vector3.up * attackHeightOffset;
+        Gizmos.DrawWireSphere(start, attackRadius);
+        Gizmos.DrawWireSphere(start + transform.forward * attackRange, attackRadius);
+        Gizmos.DrawLine(start, start + transform.forward * attackRange);
     }
 }

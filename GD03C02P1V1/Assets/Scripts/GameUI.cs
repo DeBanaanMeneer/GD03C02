@@ -9,8 +9,9 @@ public class GameUI : MonoBehaviour
     private UIDocument _uiDocument;
     private Label _healthLabel;
     private Label _combatLogLabel;
+    private ProgressBar _slomoBar;
 
-    private int _lastHealth = -1;
+    private float _lastHealth = -1f;
 
     private void Start()
     {
@@ -41,6 +42,25 @@ public class GameUI : MonoBehaviour
                 Debug.Log($" -> Found Label with name: '{lbl.name}'");
             }
         }
+
+        _slomoBar = root.Q<ProgressBar>("SlomoBar");
+        if (_slomoBar == null)
+        {
+            // Dynamically create a simple visual bar if not found in UXML
+            _slomoBar = new ProgressBar();
+            _slomoBar.name = "SlomoBar";
+            _slomoBar.title = "Slomo Energy";
+            _slomoBar.lowValue = 0f;
+            _slomoBar.highValue = 100f;
+            _slomoBar.value = 100f;
+            
+            _slomoBar.style.width = 300f;
+            _slomoBar.style.position = Position.Absolute;
+            _slomoBar.style.bottom = 20f;
+            _slomoBar.style.left = 20f;
+            
+            root.Add(_slomoBar);
+        }
     }
 
     private void Update()
@@ -54,10 +74,22 @@ public class GameUI : MonoBehaviour
         }
 
         // Update Health UI if it changed
-        if (_lastHealth != combatManager.playerHealth)
+        if (Mathf.Abs(_lastHealth - combatManager.playerHealth) > 0.01f)
         {
             _lastHealth = combatManager.playerHealth;
-            _healthLabel.text = $"Player Health: {_lastHealth}";
+            _healthLabel.text = $"Player Health: {_lastHealth.ToString("F1")}";
+        }
+
+        // Update Slomo Bar
+        if (_slomoBar != null && combatManager != null)
+        {
+            _slomoBar.style.display = combatManager.useEnergySystem ? DisplayStyle.Flex : DisplayStyle.None;
+            if (combatManager.useEnergySystem)
+            {
+                _slomoBar.highValue = combatManager.maxSlomoEnergy;
+                _slomoBar.value = combatManager.currentSlomoEnergy;
+                _slomoBar.title = $"Slomo Energy: {Mathf.CeilToInt(combatManager.currentSlomoEnergy)}";
+            }
         }
     }
 

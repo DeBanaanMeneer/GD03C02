@@ -108,6 +108,7 @@ public class ShapeDrawer : MonoBehaviour
         {
             Debug.Log("Line too short to form a shape!");
             StopDrawing();
+            if (combatManager != null) combatManager.ForceDeactivateSlomo();
             return;
         }
 
@@ -128,9 +129,13 @@ public class ShapeDrawer : MonoBehaviour
         if (boundsWidth < minShapeSize && boundsHeight < minShapeSize)
         {
             Debug.Log($"<color=yellow>Shape rejected! Too small. Width: {boundsWidth}, Height: {boundsHeight}</color>");
-            if (combatManager != null && combatManager.gameUI != null)
+            if (combatManager != null)
             {
-                combatManager.gameUI.ShowCustomMessage("Shape drawn too small!");
+                if (combatManager.gameUI != null)
+                {
+                    combatManager.gameUI.ShowCustomMessage("Shape drawn too small!");
+                }
+                combatManager.ForceDeactivateSlomo();
             }
             StopDrawing();
             return; // Don't even resolve combat

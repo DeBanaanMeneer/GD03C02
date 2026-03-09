@@ -6,10 +6,20 @@ public class CombatManager : MonoBehaviour
     [Header("Combat Settings")]
     public float groupingRadius = 5f;
     public float slowMotionTimeScale = 0.1f;
-    public int playerHealth = 10;
+    public float playerHealth = 10f;
     
     [Header("Input")]
     public UnityEngine.InputSystem.Key groupingKey = UnityEngine.InputSystem.Key.LeftShift;
+    public UnityEngine.InputSystem.Key toggleEnergyKey = UnityEngine.InputSystem.Key.Tab;
+
+    [Header("Slomo Energy Testing")]
+    public bool useEnergySystem = true;
+    public float maxSlomoEnergy = 100f;
+    public float slomoEnergyDrainRate = 25f; // Per real-time second
+    public float slomoEnergyGainPerKill = 35f;
+    
+    // Changing standard player Health as well for cleaner variable separation
+    [HideInInspector] public float currentSlomoEnergy;
 
     [Header("Visuals")]
     public GameObject groupingIndicatorPrefab; // E.g., a simple cylinder/ring with a transparent material
@@ -20,6 +30,7 @@ public class CombatManager : MonoBehaviour
     private bool _isSlomoActive = false;
     public bool IsSlomoActive => _isSlomoActive; // Added so ShapeDrawer can read it
     private List<EnemyAI> _groupedEnemies = new List<EnemyAI>();
+    private bool _requireKeyRelease = false;
 
     private void Start()
     {
@@ -41,22 +52,56 @@ public class CombatManager : MonoBehaviour
             // Scale indicator to match radius (assuming default cylinder is 1x2x1 diameter)
             _currentIndicator.transform.localScale = new Vector3(groupingRadius * 2, 0.1f, groupingRadius * 2);
         }
+
+        currentSlomoEnergy = maxSlomoEnergy;
     }
 
     private void Update()
     {
-        // Toggle slomo
+        // Toggle Energy System Test Mode
         if (UnityEngine.InputSystem.Keyboard.current != null && 
-            UnityEngine.InputSystem.Keyboard.current[groupingKey].wasPressedThisFrame)
+            UnityEngine.InputSystem.Keyboard.current[toggleEnergyKey].wasPressedThisFrame)
         {
-            if (!_isSlomoActive)
-                ActivateSlomo();
+            useEnergySystem = !useEnergySystem;
+            if (gameUI != null)
+                gameUI.ShowCustomMessage($"Energy System: {(useEnergySystem ? "ON" : "OFF")}");
+        }
+
+        // Activate slomo while holding the key
+        if (UnityEngine.InputSystem.Keyboard.current != null)
+        {
+            bool isPressed = UnityEngine.InputSystem.Keyboard.current[groupingKey].isPressed;
+
+            // Don't allow activating if energy is 0 and system is ON
+            bool hasEnergy = !useEnergySystem || currentSlomoEnergy > 0f;
+
+            if (isPressed && hasEnergy)
+            {
+                if (!_requireKeyRelease && !_isSlomoActive)
+                    ActivateSlomo();
+            }
             else
-                DeactivateSlomo();
+            {
+                _requireKeyRelease = false;
+                if (_isSlomoActive)
+                    DeactivateSlomo();
+            }
         }
 
         if (_isSlomoActive)
         {
+            // Handle Energy Drain
+            if (useEnergySystem)
+            {
+                // Unscaled time so we drain at a consistent real-time rate regardless of slomo factor
+                currentSlomoEnergy -= slomoEnergyDrainRate * Time.unscaledDeltaTime;
+                if (currentSlomoEnergy <= 0f)
+                {
+                    currentSlomoEnergy = 0f;
+                    ForceDeactivateSlomo();
+                }
+            }
+
             // Keep indicator under player
             if (_currentIndicator != null)
             {
@@ -162,7 +207,7 @@ public class CombatManager : MonoBehaviour
                 gameUI.ShowCombatResult(0, drawnCorners, drawnCorners);
             }
 
-            DeactivateSlomo();
+            ForceDeactivateSlomo();
             return;
         }
 
@@ -208,12 +253,25 @@ public class CombatManager : MonoBehaviour
             }
         }
 
+        // Gain Energy on Kills
+        if (useEnergySystem && damageToDeal > 0)
+        {
+            currentSlomoEnergy += damageToDeal * slomoEnergyGainPerKill;
+            if (currentSlomoEnergy > maxSlomoEnergy) currentSlomoEnergy = maxSlomoEnergy;
+        }
+
         // Update UI
         if (gameUI != null)
         {
             gameUI.ShowCombatResult(damageToDeal, selfDamage, drawnCorners);
         }
 
+        ForceDeactivateSlomo();
+    }
+
+    public void ForceDeactivateSlomo()
+    {
+        _requireKeyRelease = true;
         DeactivateSlomo();
     }
 
@@ -221,5 +279,26 @@ public class CombatManager : MonoBehaviour
     {
         Gizmos.color = new Color(0, 1, 0, 0.3f);
         Gizmos.DrawSphere(transform.position, groupingRadius);
+    }
+
+    public void TakeDamage(float amount)
+    {
+        playerHealth -= amount;
+        if (playerHealth <= 0)
+        {
+            Debug.Log("<color=red>PLAYER DIED!</color>");
+            DeactivateSlomo();
+
+            Cursor.lockState = CursorLockMode.None;
+            Cursor.visible = true;
+
+            // Stop the game natively
+#if UNITY_EDITOR
+            UnityEditor.EditorApplication.isPlaying = false;
+#else
+            Application.Quit();
+#endif
+            Destroy(gameObject);
+        }
     }
 }
