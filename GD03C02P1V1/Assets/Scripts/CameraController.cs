@@ -6,14 +6,18 @@ public class CameraController : MonoBehaviour
     [Header("Targeting")]
     [Tooltip("The player GameObject to follow.")]
     public Transform playerTransform;
-    
-    [Tooltip("The local offset from the player's position (e.g., eye height).")]
-    public Vector3 positionOffset = new Vector3(0f, 0.6f, 0f);
+
+    [Header("Distance & Offset")]
+    public float distance = 5f;
+    public Vector3 targetOffset = new Vector3(0f, 1.5f, 0f);
 
     [Header("Look Settings")]
-    public float mouseSensitivity = 2f;
+    public float mouseSensitivity = 10f;
+    public float minPitch = -20f;
+    public float maxPitch = 80f;
 
-    private float _cameraPitch = 0f;
+    private float _yaw = 0f;
+    private float _pitch = 0f;
     private CombatManager _combatManager;
 
     private void Start()
@@ -27,10 +31,12 @@ public class CameraController : MonoBehaviour
             {
                 playerTransform = player.transform;
             }
-            else
-            {
-                Debug.LogWarning("[CameraController] No PlayerTransform assigned and couldn't find a PlayerController in the scene!");
-            }
+        }
+
+        if (playerTransform != null)
+        {
+            _yaw = playerTransform.eulerAngles.y;
+            _pitch = transform.eulerAngles.x;
         }
 
         Cursor.lockState = CursorLockMode.Locked;
@@ -39,6 +45,8 @@ public class CameraController : MonoBehaviour
 
     private void LateUpdate()
     {
+        if (playerTransform == null) return;
+
         bool isSlomoActive = _combatManager != null && _combatManager.IsSlomoActive;
 
         if (isSlomoActive)
@@ -52,28 +60,36 @@ public class CameraController : MonoBehaviour
             Cursor.visible = false;
 
             var mouse = Mouse.current;
-            if (mouse != null && playerTransform != null)
+            if (mouse != null)
             {
                 float mouseX = mouse.delta.x.ReadValue() * mouseSensitivity * Time.deltaTime;
                 float mouseY = mouse.delta.y.ReadValue() * mouseSensitivity * Time.deltaTime;
 
-                // Rotate Character Left/Right (The camera will follow this rotation automatically at the end of LateUpdate)
-                playerTransform.Rotate(Vector3.up * mouseX);
+                _yaw += mouseX;
+                _pitch -= mouseY;
+                _pitch = Mathf.Clamp(_pitch, minPitch, maxPitch);
 
-                // Rotate Camera Pitch Up/Down internally
-                _cameraPitch -= mouseY;
-                _cameraPitch = Mathf.Clamp(_cameraPitch, -80f, 80f);
+                // Rotate Character Left/Right to match camera
+                playerTransform.rotation = Quaternion.Euler(0f, _yaw, 0f);
             }
         }
 
-        // Apply following and rotation every frame (even in slomo, to keep it attached if the player moves)
-        if (playerTransform != null)
-        {
-            // 1. Follow the player's position, applying the offset relative to the player's rotation
-            transform.position = playerTransform.position + playerTransform.TransformVector(positionOffset);
-            
-            // 2. Match the player's Y rotation, but apply our own X pitch for looking up/down
-            transform.rotation = Quaternion.Euler(_cameraPitch, playerTransform.eulerAngles.y, 0f);
-        }
+        CalculateCameraPositionAndRotation();
+    }
+
+    private void CalculateCameraPositionAndRotation()
+    {
+        // Target center position
+        Vector3 targetCenter = playerTransform.position + targetOffset;
+
+        // Desired camera rotation
+        Quaternion rotation = Quaternion.Euler(_pitch, _yaw, 0f);
+
+        // Offset backward by distance
+        Vector3 position = targetCenter - (rotation * Vector3.forward * distance);
+
+        // Apply rotation and position
+        transform.position = position;
+        transform.rotation = rotation;
     }
 }
