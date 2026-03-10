@@ -1,0 +1,24 @@
+**Game Overview**
+This is a combat and movement prototype featuring a 3rd-person isometric camera and reactive enemy AI. Survive against groups of roaming enemies using your mobility and diverse melee attacks!
+
+**Core Features & Mechanics**
+- **Camera & Movement:** The player moves using classic WASD controls relative to the camera's forward direction. This allows for walking forward (W), backpedaling (S), and strafing (A/D) to easily kite enemies while keeping them in view.
+- **Jump Mechanic:** A basic jumping system to give the player extra mobility options and allow for vertical level design elements.
+
+**Combat System**
+The player is equipped with two distinct melee attacks that offer a fast and snappy "lunge" visual feedback when striking:
+- **Left Click (Lunge Attack):** A quick, targeted attack that hits enemies directly in front of the player within a sphere radius. Great for picking off singular targets.
+- **Right Click (Swipe Attack):** A wider, heavier swipe that strikes any enemies caught in a large rectangular area in front of the player. Perfect for crowd control when surrounded by multiple foes.
+
+**Tethering Tag Mechanic**
+A core tactical feature allowing you to manipulate enemy positioning:
+- **Tagging (E Key):** Tag nearby enemies to tether them together. A visual line connects all tagged foes, marking them for a combo.
+- **Retract (R Key):** Retract the tether to violently pull all tagged enemies toward a central point. This groups them up and applies a "hitstun" effect, leaving them vulnerable to your swipe attacks.
+
+**Enemy AI & Behavior**
+- **Wandering & Detection:** Enemies roam the level organically until the player enters their detection radius, at which point they will lock on and aggressively chase the player.
+- **Windup Damage:** Getting caught by an enemy is dangerous, but fair. If an enemy gets within melee range of the player, a 2-second windup timer begins. If the player doesn't evade out of the radius in time, the enemy will deal damage. 
+
+**Health & Game Loop**
+- Enemies are destroyed after sustaining 3 distinct hits from the player's attacks.
+- The player features a health system powered by a dynamic UI Toolkit health bar that updates in real-time. If the player's health drops to 0, it's game over!

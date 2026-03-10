@@ -15,6 +15,7 @@ GameObject:
   - component: {fileID: 5172801432586483429}
   - component: {fileID: 3222259977643092866}
   - component: {fileID: 1279420135049392342}
+  - component: {fileID: 339147712267467778}
   m_Layer: 3
   m_Name: Enemy
   m_TagString: Untagged
@@ -156,6 +157,14 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::EnemyWander
   moveSpeed: 2
   changeDirectionInterval: 3
+  damageRadius: 1.01
+  damageAmount: 10
+  damageCooldown: 1
+  attackWindupTime: 2
+  playerLayer:
+    serializedVersion: 2
+    m_Bits: 64
+  detectionRadius: 10
 --- !u!114 &1279420135049392342
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -168,4 +177,17 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 88e81ed6dd52a794db011ef7b796a9cd, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Tetherable
-  hitstunDuration: 2
+  hitstunDuration: 5
+--- !u!114 &339147712267467778
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 3386619256100265204}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 4cef3bf6958db664fa538433c7222a22, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::EnemyHealth
+  maxHits: 3
