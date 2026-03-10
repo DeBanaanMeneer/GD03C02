@@ -84,7 +84,9 @@ public class CombatManager : MonoBehaviour
             {
                 _requireKeyRelease = false;
                 if (_isSlomoActive)
+                {
                     DeactivateSlomo();
+                }
             }
         }
 
@@ -136,14 +138,6 @@ public class CombatManager : MonoBehaviour
 
         if (_currentIndicator != null)
             _currentIndicator.SetActive(false);
-
-        // Clear grouped state
-        foreach (var enemy in _groupedEnemies)
-        {
-            if (enemy != null)
-                enemy.isGrouped = false;
-        }
-        _groupedEnemies.Clear();
         
         Debug.Log("Slomo Deactivated.");
     }
@@ -174,8 +168,6 @@ public class CombatManager : MonoBehaviour
     // Called by the ShapeDrawer when a shape is completed
     public void ResolveCombat(int drawnCorners)
     {
-        if (!_isSlomoActive) return;
-
         int enemyCount = _groupedEnemies.Count;
 
         if (enemyCount == 0)
@@ -208,6 +200,7 @@ public class CombatManager : MonoBehaviour
             }
 
             ForceDeactivateSlomo();
+            ClearGroupedEnemies();
             return;
         }
 
@@ -267,6 +260,17 @@ public class CombatManager : MonoBehaviour
         }
 
         ForceDeactivateSlomo();
+        ClearGroupedEnemies();
+    }
+
+    public void ClearGroupedEnemies()
+    {
+        foreach (var enemy in _groupedEnemies)
+        {
+            if (enemy != null)
+                enemy.isGrouped = false;
+        }
+        _groupedEnemies.Clear();
     }
 
     public void ForceDeactivateSlomo()

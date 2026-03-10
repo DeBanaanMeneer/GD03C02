@@ -51,14 +51,10 @@ public class CameraController : MonoBehaviour
 
         if (isSlomoActive)
         {
-            Cursor.lockState = CursorLockMode.None;
-            Cursor.visible = true;
+            // Do not unlock cursor anymore, ShapeDrawer handles its own virtual cursor from mouse deltas
         }
         else
         {
-            Cursor.lockState = CursorLockMode.Locked;
-            Cursor.visible = false;
-
             var mouse = Mouse.current;
             if (mouse != null)
             {

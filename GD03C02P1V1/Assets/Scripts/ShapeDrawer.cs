@@ -6,16 +6,31 @@ using UnityEngine.InputSystem;
 public class ShapeDrawer : MonoBehaviour
 {
     [Header("Drawing Settings")]
-    public float minDistanceBetweenPoints = 5f; // Pixels
-    public float rdpTolerance = 25f; // Tolerance for shape simplification (higher = fewer corners)
     public float minShapeSize = 100f; // Pixels - How wide/tall the drawing must be minimum
+    public float autoCloseDistance = 50f; // If the final point is within 50px of the start point, don't count it as an extra corner
+    public float minDistanceBetweenPoints = 5f; // Pixels for freehand trace
+    
+    [Header("Protractor Settings")]
+    public float cornerAngleThreshold = 45f; // Degrees - How sharp a turn must be to automatically drop a corner
+    public float minDistanceBeforeCornerCheck = 25f; // Pixels - Wait until they've drawn a bit of a straight line before measuring turns
+    
+    [Header("Sniper Mode (Sensitivity)")]
+    [Range(0.1f, 1f)]
+    public float drawSensitivity = 0.3f; // 1.0 is normal speed, 0.3 is 30% speed
+    
+    // We need to track a "virtual" mouse position because we can't easily force the OS hardware cursor to slow down in Unity without locking it.
+    private Vector2 _virtualMousePosition;
     
     [Header("References")]
     public CombatManager combatManager;
+    public UnityEngine.UI.Image customCursorImage;
 
     private LineRenderer _lineRenderer;
-    private List<Vector2> _drawnPoints = new List<Vector2>();
+    private List<Vector2> _drawnPoints = new List<Vector2>(); // Freehand visual points
+    private List<Vector2> _geometricAnchors = new List<Vector2>(); // Invisible sharp corners
+    
     private bool _isDrawing = false;
+    private bool _isDrawingModeActive = false;
 
     private void Start()
     {
@@ -26,93 +41,205 @@ public class ShapeDrawer : MonoBehaviour
 
     private void Update()
     {
-        // Only allow drawing if Slomo is active
-        if (combatManager == null || !combatManager.IsSlomoActive)
+        // Handle Slomo State Transitions for Virtual Cursor
+        bool shouldBeDrawingMode = combatManager != null && combatManager.IsSlomoActive;
+
+        if (shouldBeDrawingMode && !_isDrawingModeActive)
         {
-            if (_isDrawing) StopDrawing();
+            EnterDrawingMode();
+        }
+        else if (!shouldBeDrawingMode && _isDrawingModeActive)
+        {
+            // The moment Slomo ends, we Stop Drawing and Evaluate whatever we have!
+            StopDrawingAndEvaluate();
+            ExitDrawingMode();
             return;
         }
+
+        if (!shouldBeDrawingMode) return;
 
         var mouse = Mouse.current;
         if (mouse == null) return;
 
-        // Start drawing
+        // Read raw mouse movement, apply our sensitivity multiplier
+        Vector2 mouseDelta = mouse.delta.ReadValue() * drawSensitivity;
+        
+        // Move our virtual cursor
+        _virtualMousePosition += mouseDelta;
+        
+        // Clamp it to the screen bounds
+        _virtualMousePosition.x = Mathf.Clamp(_virtualMousePosition.x, 0, Screen.width);
+        _virtualMousePosition.y = Mathf.Clamp(_virtualMousePosition.y, 0, Screen.height);
+
+        if (customCursorImage != null)
+        {
+            customCursorImage.transform.position = _virtualMousePosition;
+        }
+
+        // Handle organic freehand drawing
         if (mouse.leftButton.wasPressedThisFrame)
         {
-            StartDrawing(mouse.position.ReadValue());
+            StartFreehandDrawing(_virtualMousePosition);
         }
-        // Continue drawing
         else if (mouse.leftButton.isPressed && _isDrawing)
         {
-            ContinueDrawing(mouse.position.ReadValue());
-        }
-        // Stop drawing and Evaluate
-        else if (mouse.leftButton.wasReleasedThisFrame && _isDrawing)
-        {
-            StopDrawingAndEvaluate();
+            ContinueFreehandDrawing(_virtualMousePosition);
         }
     }
 
-    private void StartDrawing(Vector2 screenPosition)
+    private void StartFreehandDrawing(Vector2 screenPosition)
     {
         _isDrawing = true;
         _drawnPoints.Clear();
+        _geometricAnchors.Clear();
         _lineRenderer.positionCount = 0;
         
-        AddPoint(screenPosition);
+        // Add the very first visual point and geometric anchor
+        AddVisualPoint(screenPosition);
+        AddGeometricAnchor(screenPosition);
     }
 
-    private void ContinueDrawing(Vector2 screenPosition)
+    private void ContinueFreehandDrawing(Vector2 screenPosition)
     {
-        if (_drawnPoints.Count == 0) return;
+        if (_drawnPoints.Count == 0 || _geometricAnchors.Count == 0) return;
 
-        Vector2 lastPoint = _drawnPoints[_drawnPoints.Count - 1];
-        if (Vector2.Distance(lastPoint, screenPosition) > minDistanceBetweenPoints)
+        Vector2 lastVisualPoint = _drawnPoints[_drawnPoints.Count - 1];
+        Vector2 lastAnchor = _geometricAnchors[_geometricAnchors.Count - 1];
+
+        // 1. Draw Visual Freehand Line
+        if (Vector2.Distance(lastVisualPoint, screenPosition) > minDistanceBetweenPoints)
         {
-            AddPoint(screenPosition);
+            AddVisualPoint(screenPosition);
+            
+            // 2. Protractor Math: Check if they just turned a sharp corner
+            CheckForGeometricCorner(screenPosition, lastAnchor);
         }
     }
 
-    private void AddPoint(Vector2 screenPosition)
+    private void CheckForGeometricCorner(Vector2 currentScreenPos, Vector2 lastAnchor)
+    {
+        // Don't calculate angles until they've drawn a long enough line from the last anchor
+        // This prevents jittery mouse movements from dropping 50 corners instantly
+        float distanceFromAnchor = Vector2.Distance(lastAnchor, currentScreenPos);
+        if (distanceFromAnchor < minDistanceBeforeCornerCheck) return;
+
+        // We need 3 points to check an angle: 
+        // A) The last locked anchor
+        // B) A point halfway between the anchor and the current cursor (the direction they *were* going)
+        // C) The current cursor (the direction they *are* going)
+        
+        // Let's use the actual visual history to find their recent trajectory
+        int recentPointIndex = _drawnPoints.Count - 5; // Look back 5 points for a smoother vector
+        if (recentPointIndex <= 0) return;
+        
+        Vector2 recentTrajectoryPoint = _drawnPoints[recentPointIndex];
+        
+        // Vector from Last Anchor -> Recent Point = Their established line direction
+        Vector2 establishedDirection = (recentTrajectoryPoint - lastAnchor).normalized;
+        
+        // Vector from Recent Point -> Current Cursor = Their brand new turn direction
+        Vector2 currentDirection = (currentScreenPos - recentTrajectoryPoint).normalized;
+
+        // Calculate the angle between where they were going and where they are going now
+        float angleChange = Vector2.Angle(establishedDirection, currentDirection);
+
+        if (angleChange >= cornerAngleThreshold)
+        {
+            // DEBOUNCE: Don't drop a new anchor if we just dropped one very close by (prevents corner spam)
+            if (Vector2.Distance(lastAnchor, recentTrajectoryPoint) < minDistanceBeforeCornerCheck) return;
+
+            // They made a sharp turn! Drop an anchor exactly at the "pivot" point (recentTrajectoryPoint)
+            AddGeometricAnchor(recentTrajectoryPoint);
+        }
+    }
+
+    private void AddVisualPoint(Vector2 screenPosition)
     {
         _drawnPoints.Add(screenPosition);
         
-        // To make the line perfectly align with the mouse in a 3D perspective camera:
-        // We create a Ray from the mouse pointer.
-        // We calculate precisely where that ray hits a flat plane strictly facing the camera.
+        Vector3 screenPosWithDepth = new Vector3(screenPosition.x, screenPosition.y, 5f); 
+        Vector3 worldPos = Camera.main.ScreenToWorldPoint(screenPosWithDepth);
         
-        Ray ray = Camera.main.ScreenPointToRay(screenPosition);
-        Plane drawPlane = new Plane(Camera.main.transform.forward * -1, Camera.main.transform.position + Camera.main.transform.forward * 5f);
+        _lineRenderer.positionCount++;
+        _lineRenderer.SetPosition(_lineRenderer.positionCount - 1, worldPos);
+    }
+
+    private void AddGeometricAnchor(Vector2 screenPosition)
+    {
+        _geometricAnchors.Add(screenPosition);
         
-        if (drawPlane.Raycast(ray, out float distance))
-        {
-            Vector3 worldPos = ray.GetPoint(distance);
-            
-            _lineRenderer.positionCount++;
-            _lineRenderer.SetPosition(_lineRenderer.positionCount - 1, worldPos);
-        }
+        // Optional: Play a nice "click" sound or spawn a particle effect here 
+        // so the player feels the "Protractor Effect" locking in!
+        Debug.Log($"<color=white>Anchor Dropped #{_geometricAnchors.Count}</color>");
     }
 
     private void StopDrawing()
     {
         _isDrawing = false;
         _drawnPoints.Clear();
+        _geometricAnchors.Clear();
         _lineRenderer.positionCount = 0;
+    }
+
+    private void EnterDrawingMode()
+    {
+        _isDrawingModeActive = true;
+        
+        // Lock the hardware cursor so we can rely entirely on mouse Deltas and build our own virtual cursor
+        Cursor.lockState = CursorLockMode.Locked; 
+        Cursor.visible = false;
+        
+        // Start the virtual cursor at the center of the screen
+        _virtualMousePosition = new Vector2(Screen.width / 2f, Screen.height / 2f);
+        
+        if (customCursorImage != null) 
+        {
+            customCursorImage.gameObject.SetActive(true);
+            customCursorImage.transform.position = _virtualMousePosition;
+        }
+    }
+
+    private void ExitDrawingMode()
+    {
+        _isDrawingModeActive = false;
+        
+        if (customCursorImage != null) customCursorImage.gameObject.SetActive(false);
     }
 
     private void StopDrawingAndEvaluate()
     {
         _isDrawing = false;
 
+        // Ensure they drew at least a few points freehand
         if (_drawnPoints.Count < 3)
         {
-            Debug.Log("Line too short to form a shape!");
+            Debug.Log("Shape too short!");
             StopDrawing();
             if (combatManager != null) combatManager.ForceDeactivateSlomo();
             return;
         }
 
-        // 0. Verify the shape isn't too small
+        // 0. Manual-Close Check
+        // The player must deliberately bring their cursor back to where they started.
+        Vector2 startPoint = _drawnPoints[0];
+        Vector2 endPoint = _drawnPoints[_drawnPoints.Count - 1];
+        
+        if (Vector2.Distance(endPoint, startPoint) > autoCloseDistance)
+        {
+            Debug.Log($"<color=orange>Shape rejected! Not closed manually. Distance: {Vector2.Distance(endPoint, startPoint)}</color>");
+            if (combatManager != null)
+            {
+                if (combatManager.gameUI != null)
+                {
+                    combatManager.gameUI.ShowCustomMessage("Shape must be closed!");
+                }
+                combatManager.ForceDeactivateSlomo();
+            }
+            StopDrawing();
+            return;
+        }
+
+        // 1. Verify the shape isn't too small
         float minX = float.MaxValue, maxX = float.MinValue;
         float minY = float.MaxValue, maxY = float.MinValue;
         foreach (var p in _drawnPoints)
@@ -138,33 +265,54 @@ public class ShapeDrawer : MonoBehaviour
                 combatManager.ForceDeactivateSlomo();
             }
             StopDrawing();
-            return; // Don't even resolve combat
+            return; 
         }
 
-        // 1. First, find the "Convex Hull" of the drawn points.
-        // This acts like a rubber band stretched around the drawing.
-        // It completely ignores any messy scribbling, overlapping lines, 
-        // or tracing back over the same line inside the shape!
-        List<Vector2> hullPoints = GetConvexHull(_drawnPoints);
+        // 2. Count distinct corners geometrically!
+        // The visible squiggly line might have 150 points.
+        // We completely ignore it and ONLY count how many sharp corners our Protractor math found.
+        
+        // Always add the final close point as the last anchor to complete the shape correctly
+        AddGeometricAnchor(endPoint);
 
-        // 2. Simplify the outer hull curve using Ramer-Douglas-Peucker
-        // This reduces the smooth curve of the hull down to sharp geometric corners.
-        List<Vector2> simplifiedPoints = DouglasPeuckerReduction(hullPoints, rdpTolerance);
-
-        // A closed shape (like a triangle) usually has the first and last point very close together.
-        // So a Triangle drawn by a human might have 4 simplified points (Start, Corner 1, Corner 2, End(close to Start)).
-        // We consider the number of corners as simplifiedPoints.Count - 1 (or just Count depending on how closed it is).
-
-        int cornerCount = simplifiedPoints.Count;
-
-        // If the start and end point are close, they form 1 continuous corner.
-        if (Vector2.Distance(simplifiedPoints[0], simplifiedPoints[simplifiedPoints.Count - 1]) < 50f)
+        // Calculate corners smartly. We don't want to blindly count the Start point as a corner
+        // because the player might have started drawing in the middle of a straight edge!
+        int cornerCount = 0;
+        
+        if (_geometricAnchors.Count >= 3)
         {
-            // It's a closed loop. The number of actual distinct corners/vertices is Count - 1.
-            cornerCount -= 1; 
+            // The middle anchors are guaranteed to be sharp turns
+            int middleTurns = _geometricAnchors.Count - 2;
+            cornerCount += middleTurns;
+            
+            // Check the seam where the shape closes (Start/End points overlap)
+            Vector2 startPos = _geometricAnchors[0];
+            Vector2 firstTurn = _geometricAnchors[1];
+            Vector2 lastTurn = _geometricAnchors[_geometricAnchors.Count - 2];
+            
+            Vector2 incomingDir = (startPos - lastTurn).normalized;
+            Vector2 outgoingDir = (firstTurn - startPos).normalized;
+            
+            float seamAngle = Vector2.Angle(incomingDir, outgoingDir);
+            
+            if (seamAngle >= cornerAngleThreshold)
+            {
+                // The seam itself forms a sharp corner!
+                cornerCount += 1;
+            }
         }
 
-        Debug.Log($"<color=cyan>Shape Recognized! Raw Points: {_drawnPoints.Count} | Simplified Points: {simplifiedPoints.Count} | Estimated Corners: {cornerCount}</color>");
+        // Sanity Check: A closed shape must have at least 1 corner (a circle), or 3 (a triangle).
+        // If they drew a perfect circle without tripping the AngleThreshold, they might have 0 corners.
+        // A standard shape should have at least 3. Let's enforce that for combat purposes unless you want 1-corner magic circles.
+        if (cornerCount < 3) 
+        {
+            // If they drew a circle, it didn't trigger sharp corners. Let's count it as a 1-corner attack (or generic spell).
+            // This allows them to draw curved loops to damage 1 enemy quickly.
+            cornerCount = 1; 
+        }
+
+        Debug.Log($"<color=cyan>HYBRID SHAPE RECOGNIZED! Raw Lines: {_drawnPoints.Count} | Sharp Geometric Corners: {cornerCount}</color>");
 
         // 3. Send the corner count to Combat Manager
         if (combatManager != null)
@@ -172,123 +320,6 @@ public class ShapeDrawer : MonoBehaviour
             combatManager.ResolveCombat(cornerCount);
         }
 
-        // Clear line after a short delay or immediately
         StopDrawing();
     }
-
-    #region Convex Hull (Gift Wrapping Algorithm)
-
-    // Finds the outer outline of all points drawn.
-    // This allows the player to scribble or overlap lines without penalty, 
-    // because it treats the whole mess as a solid volume and only cares about the outer edge!
-    private List<Vector2> GetConvexHull(List<Vector2> points)
-    {
-        if (points.Count < 3) return points;
-
-        List<Vector2> hull = new List<Vector2>();
-
-        // Find the leftmost point
-        int l = 0;
-        for (int i = 1; i < points.Count; i++)
-        {
-            if (points[i].x < points[l].x)
-            {
-                l = i;
-            }
-        }
-
-        int p = l, q;
-        do
-        {
-            hull.Add(points[p]);
-            q = (p + 1) % points.Count;
-
-            for (int i = 0; i < points.Count; i++)
-            {
-                // If i is more counterclockwise than current q, then update q
-                if (Orientation(points[p], points[i], points[q]) == 2)
-                {
-                    q = i;
-                }
-            }
-
-            p = q;
-
-        } while (p != l);
-
-        return hull;
-    }
-
-    // 0 = Collinear, 1 = Clockwise, 2 = Counterclockwise
-    private int Orientation(Vector2 p, Vector2 q, Vector2 r)
-    {
-        float val = (q.y - p.y) * (r.x - q.x) - (q.x - p.x) * (r.y - q.y);
-        if (Mathf.Abs(val) < 0.001f) return 0;  // Collinear
-        return (val > 0) ? 1 : 2; // Clockwise or Counterclockwise
-    }
-
-    #endregion
-
-    #region Ramer-Douglas-Peucker Algorithm
-    
-    // Reduces the number of points in a curve while retaining its shape
-    private List<Vector2> DouglasPeuckerReduction(List<Vector2> points, float tolerance)
-    {
-        if (points == null || points.Count < 3)
-            return points;
-
-        int firstPoint = 0;
-        int lastPoint = points.Count - 1;
-        List<int> pointIndexsToKeep = new List<int> { firstPoint, lastPoint };
-
-        while (points[firstPoint].Equals(points[lastPoint]))
-        {
-            lastPoint--;
-        }
-
-        DouglasPeuckerReductionRecursive(points, firstPoint, lastPoint, tolerance, ref pointIndexsToKeep);
-
-        pointIndexsToKeep.Sort();
-        List<Vector2> returnPoints = new List<Vector2>();
-
-        foreach (int index in pointIndexsToKeep)
-        {
-            returnPoints.Add(points[index]);
-        }
-
-        return returnPoints;
-    }
-
-    private void DouglasPeuckerReductionRecursive(List<Vector2> points, int firstPoint, int lastPoint, float tolerance, ref List<int> pointIndexsToKeep)
-    {
-        float maxDistance = 0;
-        int indexFarthest = 0;
-
-        for (int index = firstPoint; index < lastPoint; index++)
-        {
-            float distance = PerpendicularDistance(points[firstPoint], points[lastPoint], points[index]);
-            if (distance > maxDistance)
-            {
-                maxDistance = distance;
-                indexFarthest = index;
-            }
-        }
-
-        if (maxDistance > tolerance && indexFarthest != 0)
-        {
-            pointIndexsToKeep.Add(indexFarthest);
-            DouglasPeuckerReductionRecursive(points, firstPoint, indexFarthest, tolerance, ref pointIndexsToKeep);
-            DouglasPeuckerReductionRecursive(points, indexFarthest, lastPoint, tolerance, ref pointIndexsToKeep);
-        }
-    }
-
-    private float PerpendicularDistance(Vector2 Point1, Vector2 Point2, Vector2 Point)
-    {
-        float area = Mathf.Abs(.5f * (Point1.x * Point2.y + Point2.x * Point.y + Point.x * Point1.y - Point2.x * Point1.y - Point.x * Point2.y - Point1.x * Point.y));
-        float bottom = Mathf.Sqrt(Mathf.Pow(Point1.x - Point2.x, 2) + Mathf.Pow(Point1.y - Point2.y, 2));
-        float height = area / bottom * 2;
-        return height;
-    }
-
-    #endregion
 }
